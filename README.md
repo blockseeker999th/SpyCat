@@ -4,9 +4,10 @@ Spy Cat Agency (SCA)
 # installation
 
 1. git clone git@github.com:blockseeker999th/SpyCat.git (SSH)
+
    git clone https://github.com/blockseeker999th/SpyCat.git (HTTPS)
 
-2. set up applications in docker
+2. Set up applications in docker
 You can use make command from Makefile
 ``` make build ``` to start application and build all the necessary stuff
 ``` make restart ``` to restart the applications
