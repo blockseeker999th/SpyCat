@@ -16,10 +16,10 @@ func NewStorage(db *sql.DB) *Storage {
 }
 
 func (s *Storage) CreateSpyCat(cat *models.SpyCat) error {
-	_, err := s.db.Exec(
-		"INSERT INTO spy_cats (name, years_of_experience, breed, salary) VALUES ($1, $2, $3, $4)",
+	err := s.db.QueryRow(
+		"INSERT INTO spy_cats (name, years_of_experience, breed, salary) VALUES ($1, $2, $3, $4) RETURNING id",
 		cat.Name, cat.YearsOfExperience, cat.Breed, cat.Salary,
-	)
+	).Scan(&cat.ID)
 	return err
 }
 
@@ -64,10 +64,10 @@ func (s *Storage) GetSpyCat(id int) (models.SpyCat, error) {
 	return cat, nil
 }
 
-func (s *Storage) UpdateSpyCat(id int, salary float64) error {
+func (s *Storage) UpdateSpyCat(id int, salary *float64) error {
 	_, err := s.db.Exec(
 		"UPDATE spy_cats SET salary=$1 WHERE id=$2",
-		salary, id,
+		&salary, id,
 	)
 	return err
 }
@@ -97,11 +97,10 @@ func (s *Storage) CreateMission(mission *models.Mission) error {
 		return errors.New("the spy cat already has an ongoing mission")
 	}
 
-	var missionID int
 	err = tx.QueryRow(
 		"INSERT INTO missions (spy_cat_id, status) VALUES ($1, $2) RETURNING id",
 		mission.SpyCatID, mission.Status,
-	).Scan(&missionID)
+	).Scan(&mission.ID)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -112,11 +111,11 @@ func (s *Storage) CreateMission(mission *models.Mission) error {
 		return errors.New("a mission must have between 1 and 3 targets")
 	}
 
-	for _, target := range mission.Targets {
-		_, err := tx.Exec(
-			"INSERT INTO targets (mission_id, name, country, notes, completed) VALUES ($1, $2, $3, $4, $5)",
-			missionID, target.Name, target.Country, target.Notes, target.Completed,
-		)
+	for idx, target := range mission.Targets {
+		err := tx.QueryRow(
+			"INSERT INTO targets (mission_id, name, country, notes, completed) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+			mission.ID, target.Name, target.Country, target.Notes, target.Completed,
+		).Scan(&mission.Targets[idx].ID)
 		if err != nil {
 			tx.Rollback()
 			return err
@@ -272,7 +271,7 @@ func (s *Storage) CreateTarget(id int, target *models.Target) error {
 		return err
 	}
 
-	if targetCount < 1 || targetCount > 3 {
+	if targetCount < 1 || targetCount >= 3 {
 		return errors.New("a mission must have between 1 and 3 targets")
 	}
 
@@ -324,12 +323,21 @@ func (s *Storage) UpdateTarget(tId int, mId int, target *models.Target) error {
 		return err
 	}
 
-	if currentCompleted {
-		return errors.New("cannot update target after it is completed")
+	var currentNotes string
+	err = s.db.QueryRow(
+		"SELECT notes FROM targets WHERE id=$1",
+		tId,
+	).Scan(&currentNotes)
+	if err != nil {
+		return err
+	}
+
+	if currentCompleted && target.Notes != currentNotes {
+		return errors.New("cannot update notes after target is completed")
 	}
 	_, err = s.db.Exec(
-		"UPDATE targets SET name=$1, notes=$2, completed=$3 WHERE id=$4",
-		target.Name, target.Notes, target.Completed, tId,
+		"UPDATE targets SET name=$1, country=$2, notes=$3, completed=$4 WHERE id=$5",
+		target.Name, target.Country, target.Notes, target.Completed, tId,
 	)
 	if err != nil {
 		return err
@@ -358,32 +366,45 @@ func (s *Storage) UpdateTarget(tId int, mId int, target *models.Target) error {
 	return err
 }
 
-func (s *Storage) DeleteTarget(id int) error {
+func (s *Storage) DeleteTarget(tId int, mId int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
 	var currentCompleted bool
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		"SELECT completed FROM targets WHERE id=$1",
-		id,
+		tId,
 	).Scan(&currentCompleted)
 	if err != nil {
+		tx.Rollback()
 		return err
 	}
 
 	if currentCompleted {
+		tx.Rollback()
 		return errors.New("cannot delete target after it is completed")
 	}
 
 	var targetCount int
-	err = s.db.QueryRow("SELECT COUNT(*) FROM targets WHERE mission_id=$1", id).Scan(&targetCount)
+	err = tx.QueryRow("SELECT COUNT(*) FROM targets WHERE mission_id=$1", mId).Scan(&targetCount)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	if targetCount <= 1 || targetCount > 3 {
+		tx.Rollback()
+		return errors.New("a mission must have between 1 and 3 targets")
+	}
+
+	_, err = s.db.Exec("DELETE FROM targets WHERE id=$1", tId)
 	if err != nil {
 		return err
 	}
 
-	if targetCount < 1 || targetCount > 3 {
-		return errors.New("a mission must have between 1 and 3 targets")
-	}
-
-	_, err = s.db.Exec("DELETE FROM targets WHERE id=$1", id)
-	return err
+	return tx.Commit()
 }
 
 func (s *Storage) MarkMissionAsCompleted(missionID string) error {

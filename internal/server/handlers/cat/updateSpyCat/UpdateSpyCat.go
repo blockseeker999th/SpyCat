@@ -15,7 +15,7 @@ import (
 )
 
 type CatUpdater interface {
-	UpdateSpyCat(id int, salary float64) error
+	UpdateSpyCat(id int, salary *float64) error
 }
 
 func New(log *slog.Logger, catUpdater CatUpdater) http.HandlerFunc {
@@ -49,7 +49,7 @@ func New(log *slog.Logger, catUpdater CatUpdater) http.HandlerFunc {
 			return
 		}
 
-		if err := catUpdater.UpdateSpyCat(id, cat.Salary); err != nil {
+		if err := catUpdater.UpdateSpyCat(id, &cat.Salary); err != nil {
 			render.JSON(w, r, response.Response{
 				Status: http.StatusInternalServerError,
 				Error:  customErr.ErrUpdatingSpyCat.Error(),
@@ -58,11 +58,11 @@ func New(log *slog.Logger, catUpdater CatUpdater) http.HandlerFunc {
 			return
 		}
 
-		log.Info("spy cat successfully updated")
+		log.Info("spy cat salary successfully updated")
 
 		render.JSON(w, r, response.Response{
 			Status:  http.StatusNoContent,
-			Payload: cat,
+			Payload: cat.Salary,
 		})
 	}
 }
