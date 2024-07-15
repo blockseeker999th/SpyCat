@@ -13,7 +13,7 @@ import (
 )
 
 type TargetDeleter interface {
-	DeleteTarget(id int) error
+	DeleteTarget(tId int, mId int) error
 }
 
 func New(log *slog.Logger, targetDeleter TargetDeleter) http.HandlerFunc {
@@ -23,7 +23,7 @@ func New(log *slog.Logger, targetDeleter TargetDeleter) http.HandlerFunc {
 		log = logger.LogWith(log, op, r)
 
 		param := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(param)
+		tId, err := strconv.Atoi(param)
 		if err != nil {
 			log.Error(customErr.ErrInvalidId.Error(), logger.Err(err))
 
@@ -35,7 +35,20 @@ func New(log *slog.Logger, targetDeleter TargetDeleter) http.HandlerFunc {
 			return
 		}
 
-		if err := targetDeleter.DeleteTarget(id); err != nil {
+		param = chi.URLParam(r, "mission_id")
+		mId, err := strconv.Atoi(param)
+		if err != nil {
+			log.Error(customErr.ErrInvalidId.Error(), logger.Err(err))
+
+			render.JSON(w, r, response.Response{
+				Status: http.StatusBadRequest,
+				Error:  customErr.ErrCreatingTarget.Error(),
+			})
+
+			return
+		}
+
+		if err := targetDeleter.DeleteTarget(tId, mId); err != nil {
 			log.Error(customErr.ErrDeletingTarget.Error(), logger.Err(err))
 
 			render.JSON(w, r, response.Response{
